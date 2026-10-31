@@ -35,10 +35,7 @@ let cacheInstance: Cache | undefined;
 const namespacedCacheInstances = new Map<string, Cache>();
 let cacheClearGeneration = 0;
 
-// The CLI and the public ESM/CJS entry points can load separate copies of this
-// module. Share the async policy and the explicit enableCache()/disableCache()
-// choice, not cache instances or env-derived module defaults, so providers loaded
-// by extension hooks observe the evaluation's cache policy.
+// The CLI and ESM/CJS entry points share cache policy across module copies.
 const CACHE_ENABLED_CONTEXT = Symbol.for('promptfoo.cache.enabledContext.v1');
 const CACHE_NAMESPACE_CONTEXT = Symbol.for('promptfoo.cache.namespaceContext.v1');
 const CACHE_EXPLICIT_ENABLED = Symbol.for('promptfoo.cache.explicitEnabled.v1');
@@ -56,7 +53,6 @@ const cacheNamespaceStorage = (cacheContextGlobal[CACHE_NAMESPACE_CONTEXT] ??=
     namespace: string;
   }>());
 
-// Explicit enableCache()/disableCache() calls from any module copy win over this copy's env default.
 const envCacheEnabled = getEnvBool('PROMPTFOO_CACHE_ENABLED', true);
 
 const cacheType =
@@ -99,7 +95,7 @@ function getCacheInstance() {
     let cachePath = '';
     let diskCache: Cache | undefined;
 
-    if (cacheType === 'disk' && (cacheContextGlobal[CACHE_EXPLICIT_ENABLED] ?? envCacheEnabled)) {
+    if (cacheType === 'disk' && isCacheEnabledByDefault()) {
       cachePath =
         getEnvString('PROMPTFOO_CACHE_PATH') || path.join(getConfigDirectoryPath(), 'cache');
 
@@ -296,12 +292,8 @@ export function withCacheEnabled<T>(enabledOverride: boolean | undefined, fn: ()
   return cacheEnabledStorage.run({ enabled: enabledOverride }, fn);
 }
 
-function getEffectiveCacheEnabled() {
-  return (
-    cacheEnabledStorage.getStore()?.enabled ??
-    cacheContextGlobal[CACHE_EXPLICIT_ENABLED] ??
-    envCacheEnabled
-  );
+function isCacheEnabledByDefault() {
+  return cacheContextGlobal[CACHE_EXPLICIT_ENABLED] ?? envCacheEnabled;
 }
 
 export type FetchWithCacheResult<T> = {
@@ -636,7 +628,7 @@ export function claimCacheKeyOnce(cacheKey: string): boolean {
     return false;
   }
 
-  if (cacheType === 'disk' && getEffectiveCacheEnabled()) {
+  if (cacheType === 'disk' && isCacheEnabled()) {
     const cachePath =
       getEnvString('PROMPTFOO_CACHE_PATH') || path.join(getConfigDirectoryPath(), 'cache');
     const claimsPath = path.join(cachePath, 'claims');
@@ -957,7 +949,7 @@ export async function fetchWithCache<T = unknown>(
   ).toUpperCase();
   const isIdempotent = ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'].includes(method);
 
-  const cacheEnabled = getEffectiveCacheEnabled();
+  const cacheEnabled = isCacheEnabled();
   if (cacheEnabled && !bust && fetchOptions.getAuthHeaders && !providedCacheKey) {
     throw new Error(
       'Request-time authentication requires cache bypass or an explicit principal-scoped cache key.',
@@ -1148,33 +1140,12 @@ export async function fetchWithCache<T = unknown>(
   }
 }
 
-/**
- * Enable caching for all provider calls (default behavior).
- *
- * @example
- * ```typescript
- * import { cache } from 'promptfoo';
- * cache.enableCache();
- * ```
- */
+/** Enable provider caching by default across module copies. */
 export function enableCache() {
   cacheContextGlobal[CACHE_EXPLICIT_ENABLED] = true;
 }
 
-/**
- * Disable caching. Provider calls will hit the API every time.
- *
- * Useful during development or testing when you want fresh results.
- *
- * @example
- * ```typescript
- * import { cache, evaluate } from 'promptfoo';
- *
- * cache.disableCache();
- * const results = await evaluate(testSuite);  // Always fresh
- * cache.enableCache();
- * ```
- */
+/** Disable provider caching by default across module copies. */
 export function disableCache() {
   cacheContextGlobal[CACHE_EXPLICIT_ENABLED] = false;
 }
@@ -1205,20 +1176,7 @@ export async function clearCache() {
   return result;
 }
 
-/**
- * Check if caching is currently enabled.
- *
- * @returns true if cache is enabled, false otherwise
- *
- * @example
- * ```typescript
- * import { cache } from 'promptfoo';
- *
- * if (cache.isCacheEnabled()) {
- *   console.log('Cache is active');
- * }
- * ```
- */
+/** Return the cache setting for the current eval or the process default. */
 export function isCacheEnabled() {
-  return getEffectiveCacheEnabled();
+  return cacheEnabledStorage.getStore()?.enabled ?? isCacheEnabledByDefault();
 }
