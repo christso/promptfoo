@@ -864,7 +864,7 @@ async function callProviderForRunEval({
   traceContext: Awaited<ReturnType<typeof generateTraceContextIfNeeded>>;
   vars: Vars;
 }): Promise<ProviderCallResult> {
-  const startTime = Date.now();
+  const startTime = performance.now();
   const response = test.providerOutput
     ? {
         output: test.providerOutput,
@@ -889,7 +889,7 @@ async function callProviderForRunEval({
   sanitizeResponseMetadata(response);
 
   return {
-    latencyMs: Date.now() - startTime,
+    latencyMs: performance.now() - startTime,
     response,
     traceContext,
   };
